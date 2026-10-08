@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferretería - Sistema</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;background:#f4f4f0;color:#222}
+  header{background:#c2410c;color:#fff;padding:14px 24px;font-size:1.3rem;font-weight:600}
+  main{display:grid;grid-template-columns:1.4fr 1fr;gap:20px;padding:20px;max-width:1200px;margin:auto}
+  section{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px #0002}
+  h2{margin-top:0;font-size:1.05rem}
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  th,td{text-align:left;padding:6px;border-bottom:1px solid #eee}
+  input,select,button{padding:7px;margin:3px 0;font-size:.9rem}
+  button{background:#c2410c;color:#fff;border:0;border-radius:6px;cursor:pointer}
+  .bajo{color:#b91c1c;font-weight:600}
+  .msg{margin-top:8px;font-size:.9rem}
+  @media(max-width:800px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>🔧 Sistema de Ferretería</header>
+<main>
+  <section>
+    <h2>Inventario</h2>
+    <input id="buscar" placeholder="Buscar por nombre o código..." oninput="cargarProductos()">
+    <table><thead><tr><th>Código</th><th>Producto</th><th>Precio</th><th>Stock</th><th></th></tr></thead>
+    <tbody id="tbProductos"></tbody></table>
+    <h2 style="margin-top:20px">Nuevo producto</h2>
+    <input id="n_codigo" placeholder="Código"> <input id="n_nombre" placeholder="Nombre">
+    <input id="n_precio" type="number" placeholder="Precio" style="width:90px">
+    <input id="n_stock" type="number" placeholder="Stock" style="width:80px">
+    <button onclick="crearProducto()">Guardar</button>
+  </section>
+  <section>
+    <h2>Carrito de venta</h2>
+    <select id="cliente"></select>
+    <table><tbody id="tbCarrito"></tbody></table>
+    <p><strong>Total: Q<span id="total">0.00</span></strong></p>
+    <button onclick="vender()">Registrar venta</button>
+    <div class="msg" id="msg"></div>
+    <h2 style="margin-top:20px">Resumen</h2>
+    <div id="resumen"></div>
+  </section>
+</main>
+<script>
+let productos = [], carrito = [];
+const api = (u, o) => fetch('/api/' + u, o).then(async r => { const d = r.status===204 ? null : await r.json(); if(!r.ok) throw new Error(d.error); return d; });
+const post = (u, b) => api(u, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)});
+
+async function cargarProductos(){
+  productos = await api('productos?buscar=' + encodeURIComponent(document.getElementById('buscar').value));
+  document.getElementById('tbProductos').innerHTML = productos.map(p => `
+    <tr><td>${p.codigo}</td><td>${p.nombre}</td><td>Q${p.precio.toFixed(2)}</td>
+    <td class="${p.stock<=p.stock_minimo?'bajo':''}">${p.stock}</td>
+    <td><button onclick="agregar(${p.id})">+</button></td></tr>`).join('');
+}
+function agregar(id){
+  const p = productos.find(x=>x.id===id), l = carrito.find(x=>x.producto_id===id);
+  l ? l.cantidad++ : carrito.push({producto_id:id, nombre:p.nombre, precio:p.precio, cantidad:1});
+  pintarCarrito();
+}
+function quitar(i){ carrito.splice(i,1); pintarCarrito(); }
+function pintarCarrito(){
+  document.getElementById('tbCarrito').innerHTML = carrito.map((l,i)=>`
+    <tr><td>${l.nombre}</td><td>x${l.cantidad}</td><td>Q${(l.precio*l.cantidad).toFixed(2)}</td>
+    <td><button onclick="quitar(${i})">✕</button></td></tr>`).join('');
+  document.getElementById('total').textContent = carrito.reduce((s,l)=>s+l.precio*l.cantidad,0).toFixed(2);
+}
+async function vender(){
+  const msg = document.getElementById('msg');
+  try{
+    const v = await post('ventas', {cliente_id:+document.getElementById('cliente').value,
+      items:carrito.map(({producto_id,cantidad})=>({producto_id,cantidad}))});
+    msg.style.color='green'; msg.textContent = `Venta #${v.id} registrada. Total Q${v.total.toFixed(2)}`;
+    carrito=[]; pintarCarrito(); cargarProductos(); cargarResumen();
+  }catch(e){ msg.style.color='#b91c1c'; msg.textContent = e.message; }
+}
+async function crearProducto(){
+  try{
+    await post('productos', {codigo:n_codigo.value, nombre:n_nombre.value, precio:+n_precio.value, stock:+n_stock.value||0});
+    n_codigo.value=n_nombre.value=n_precio.value=n_stock.value=''; cargarProductos();
+  }catch(e){ alert(e.message); }
+}
+async function cargarResumen(){
+  const [hoy, bajo] = await Promise.all([api('reportes/ventas-hoy'), api('reportes/stock-bajo')]);
+  document.getElementById('resumen').innerHTML =
+    `<p>Ventas de hoy: <b>${hoy.cantidad_ventas}</b> · Q${hoy.total_vendido.toFixed(2)}</p>
+     <p class="bajo">Stock bajo: ${bajo.map(p=>p.nombre+' ('+p.stock+')').join(', ')||'ninguno'}</p>`;
+}
+(async()=>{
+  const cl = await api('clientes');
+  document.getElementById('cliente').innerHTML = cl.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+  cargarProductos(); cargarResumen();
+})();
+</script>
+</body>
+</html>
